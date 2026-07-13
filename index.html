@@ -654,11 +654,13 @@
   /* ════ AUTH ════ */
   // URL params — si viene ?negocio=UID&rol=cajero es acceso de cajero
   const _params     = new URLSearchParams(window.location.search);
-  const _negocioUID = _params.get('negocio');
-  const _rolParam   = _params.get('rol');
+  const _negocioUID = _params.get('negocio') || sessionStorage.getItem('panar_uidDueno');
+  const _rolParam   = _params.get('rol')     || sessionStorage.getItem('panar_rol');
 
   if (_negocioUID && _rolParam === 'cajero') {
     uidDueno = _negocioUID;
+    sessionStorage.setItem('panar_uidDueno', _negocioUID);
+    sessionStorage.setItem('panar_rol', 'cajero');
     document.getElementById('loadingScreen').classList.add('hide');
     db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get()
       .then(doc => {
@@ -680,6 +682,7 @@
         uidDueno = user.uid;
         rolActual = 'dueño';
       } else {
+        uidDueno = _negocioUID; // garantizar que está seteado
         rolActual = 'cajero';
       }
       document.getElementById('loginScreen').classList.remove('active');
