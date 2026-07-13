@@ -375,6 +375,11 @@
         <p style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;">PIN para que tu cajero entre solo a Caja.</p>
         <input type="text" id="cfgPinCajero" inputmode="numeric" maxlength="6" placeholder="Ej: 2468">
         <button class="btn-tomate" style="margin-top:10px;" id="guardarPinCajeroBtn">Guardar PIN</button>
+        <div style="margin-top:14px;padding:12px;background:rgba(0,0,0,.15);border-radius:10px;border:1px solid var(--borde)">
+          <p style="font-size:0.75rem;color:var(--muted);margin-bottom:8px;">📲 Link para tu cajero:</p>
+          <div id="linkCajeroDisplay" style="font-size:0.7rem;color:var(--naranja);word-break:break-all;padding:6px;background:rgba(0,0,0,.2);border-radius:6px;margin-bottom:8px">—</div>
+          <button class="btn-secondary" id="compartirLinkCajeroBtn" style="width:100%;font-size:0.8rem">📤 Compartir por WhatsApp</button>
+        </div>
       </div>
       <div class="config-section">
         <h4>Limpiar duplicados</h4>
@@ -522,7 +527,7 @@
   let categoriaActiva = 'Todas', grupoActivo = null;
   let productoSeleccionado = null, editandoProductoId = null;
   let featuresActuales = { stockHabilitado:false, recetasHabilitado:false, gastosHabilitado:false };
-  let rolActual = null, pinCajeroActual = '2468', whatsappNumero = '';
+  let rolActual = null, pinCajeroActual = '2468', whatsappNumero = '', uidDueno = null;
   let insumos = [], editandoInsumoId = null;
   let gastosDelTurno = [], ventasHistorialActual = [];
   let estaOnline = navigator.onLine;
@@ -609,13 +614,13 @@
       const ventas = await idbGetAll('ventas_pendientes');
       for (const v of ventas) {
         const { id, ...data } = v;
-        await db.collection('ventas').add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('negocios').doc(uidDueno).collection('ventas').add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
         await idbDelete('ventas_pendientes', id);
       }
       const cierres = await idbGetAll('cierres_pendientes');
       for (const c of cierres) {
         const { id, ...data } = c;
-        await db.collection('cierres').add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('negocios').doc(uidDueno).collection('cierres').add({ ...data, ts: firebase.firestore.FieldValue.serverTimestamp() });
         await idbDelete('cierres_pendientes', id);
       }
       await actualizarBadge();
@@ -647,11 +652,36 @@
   }
 
   /* ════ AUTH ════ */
+  // URL params — si viene ?negocio=UID&rol=cajero es acceso de cajero
+  const _params     = new URLSearchParams(window.location.search);
+  const _negocioUID = _params.get('negocio');
+  const _rolParam   = _params.get('rol');
+
+  if (_negocioUID && _rolParam === 'cajero') {
+    uidDueno = _negocioUID;
+    document.getElementById('loadingScreen').classList.add('hide');
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get()
+      .then(doc => {
+        pinCajeroActual = (doc.exists && doc.data().pinCajero) ? doc.data().pinCajero : '2468';
+      }).catch(() => {})
+      .finally(() => {
+        document.getElementById('pinCajeroInput').value = '';
+        document.getElementById('pinCajeroError').textContent = '';
+        document.getElementById('modalPinCajero').classList.add('active');
+        setTimeout(() => document.getElementById('pinCajeroInput').focus(), 50);
+      });
+  }
+
   auth.onAuthStateChanged(async user => {
     document.getElementById('loadingScreen').classList.add('hide');
     if (user) {
       await abrirIDB();
-      rolActual = user.isAnonymous ? 'cajero' : 'dueño';
+      if (!_negocioUID) {
+        uidDueno = user.uid;
+        rolActual = 'dueño';
+      } else {
+        rolActual = 'cajero';
+      }
       document.getElementById('loginScreen').classList.remove('active');
       document.getElementById('app').classList.add('active');
       cargarProductos();
@@ -662,7 +692,7 @@
       aplicarRestriccionesPorRol();
       actualizarEstadoConexion(navigator.onLine);
       await actualizarBadge();
-    } else {
+    } else if (!_negocioUID) {
       rolActual = null;
       document.getElementById('app').classList.remove('active');
       document.getElementById('loginScreen').classList.add('active');
@@ -678,7 +708,7 @@
     auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(() => { document.getElementById('loginError').textContent = 'No se pudo iniciar sesión con Google'; });
   });
   document.getElementById('loginCajeroBtn').addEventListener('click', () => {
-    db.collection('configuracion').doc('general').get().then(doc => {
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get().then(doc => {
       pinCajeroActual = (doc.exists && doc.data().pinCajero) ? doc.data().pinCajero : '2468';
       document.getElementById('pinCajeroInput').value = '';
       document.getElementById('pinCajeroError').textContent = '';
@@ -722,7 +752,7 @@
       });
       return;
     }
-    db.collection('productos').onSnapshot(snap => {
+    db.collection('negocios').doc(uidDueno).collection('productos').onSnapshot(snap => {
       productos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
       if (productos.length === 0) precargarMenuEjemplo();
       if (idb) idbCacheCatalogo(productos);
@@ -754,7 +784,7 @@
       bebida('Agua sin gas','💧','Gaseosas',{'500ml':1000}),
       simple('Café con leche','☕','Lácteos',1800), simple('Té','🍵','Lácteos',1500),
       simple('Manteca (1/4)','🧈','Extras',1200), simple('Dulce de leche (1/4kg)','🍯','Extras',1800),
-    ].forEach(p => db.collection('productos').add(p));
+    ].forEach(p => db.collection('negocios').doc(uidDueno).collection('productos').add(p));
   }
 
   const GRUPOS_MAP = { 'Panes':'Panes','Facturas':'Facturas','Tortas':'Tortas','Sandwiches':'Sandwiches','Gaseosas':'Bebidas','Lácteos':'Bebidas','Extras':'Extras','Otros':'Otros' };
@@ -844,7 +874,7 @@
     const ventaData = { items:carrito, total, metodoPago, fecha:new Date().toISOString(), fechaDia:new Date().toISOString().slice(0,10) };
     if (estaOnline) {
       try {
-        await db.collection('ventas').add({ ...ventaData, ts:firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('negocios').doc(uidDueno).collection('ventas').add({ ...ventaData, ts:firebase.firestore.FieldValue.serverTimestamp() });
         descontarStockPorVenta(itemsVendidos);
         toast('Venta registrada — $' + total);
       } catch(e) { logError('cobrar',e.message); toast('Error al guardar. Reintentá.'); return; }
@@ -873,7 +903,7 @@
     }).join('');
     document.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => abrirModalProducto(b.dataset.edit)));
     document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
-      if (confirm('¿Eliminar este producto?')) db.collection('productos').doc(b.dataset.del).delete().then(()=>toast('Producto eliminado'));
+      if (confirm('¿Eliminar este producto?')) db.collection('negocios').doc(uidDueno).collection('productos').doc(b.dataset.del).delete().then(()=>toast('Producto eliminado'));
     }));
   }
 
@@ -923,7 +953,7 @@
     const data = { nombre:document.getElementById('prodNombre').value.trim(), categoria:document.getElementById('prodCategoria').value, emoji:document.getElementById('prodEmoji').value.trim(), precios, activo:document.getElementById('prodActivo').checked };
     if (!data.nombre) { toast('Falta el nombre'); return; }
     if (!Object.keys(precios).length) { toast('Agregá al menos un tamaño'); return; }
-    const ref = editandoProductoId ? db.collection('productos').doc(editandoProductoId) : db.collection('productos').doc();
+    const ref = editandoProductoId ? db.collection('negocios').doc(uidDueno).collection('productos').doc(editandoProductoId) : db.collection('negocios').doc(uidDueno).collection('productos').doc();
     ref.set(data,{merge:true}).then(()=>{ toast('Producto guardado'); document.getElementById('modalProducto').classList.remove('active'); }).catch(e=>logError('guardarProducto',e));
   });
 
@@ -971,7 +1001,7 @@
   }
 
   function guardarRecetaProducto(pid) {
-    db.collection('productos').doc(pid).set({ recetaPorTamano:leerRecetaDesdeDOM(pid) },{merge:true}).then(()=>toast('Receta guardada ✓')).catch(e=>logError('guardarReceta',e));
+    db.collection('negocios').doc(uidDueno).collection('productos').doc(pid).set({ recetaPorTamano:leerRecetaDesdeDOM(pid) },{merge:true}).then(()=>toast('Receta guardada ✓')).catch(e=>logError('guardarReceta',e));
   }
 
   function agregarIngredienteEnReceta(pid, tamano) {
@@ -1000,7 +1030,7 @@
 
   /* ════ STOCK ════ */
   function cargarInsumos() {
-    db.collection('insumos').onSnapshot(snap => { insumos=snap.docs.map(d=>({id:d.id,...d.data()})); renderInsumosLista(); });
+    db.collection('negocios').doc(uidDueno).collection('insumos').onSnapshot(snap => { insumos=snap.docs.map(d=>({id:d.id,...d.data()})); renderInsumosLista(); });
   }
 
   function listaInsumosBasicos() {
@@ -1020,7 +1050,7 @@
     const ex=new Set(insumos.map(i=>i.nombre.trim().toLowerCase()));
     const faltantes=listaInsumosBasicos().filter(b=>!ex.has(b.nombre.trim().toLowerCase()));
     if (!faltantes.length) { toast('Ya tenés todos los insumos básicos'); return; }
-    faltantes.forEach(i=>db.collection('insumos').add(i));
+    faltantes.forEach(i=>db.collection('negocios').doc(uidDueno).collection('insumos').add(i));
     toast(`Se agregaron ${faltantes.length} insumos básicos`);
   });
 
@@ -1035,7 +1065,7 @@
     }).join('');
     cont.querySelectorAll('[data-editins]').forEach(b=>b.addEventListener('click',()=>abrirModalInsumo(b.dataset.editins)));
     cont.querySelectorAll('[data-delins]').forEach(b=>b.addEventListener('click',()=>{
-      if(confirm('¿Eliminar este insumo?')) db.collection('insumos').doc(b.dataset.delins).delete().then(()=>toast('Insumo eliminado'));
+      if(confirm('¿Eliminar este insumo?')) db.collection('negocios').doc(uidDueno).collection('insumos').doc(b.dataset.delins).delete().then(()=>toast('Insumo eliminado'));
     }));
   }
 
@@ -1055,7 +1085,7 @@
   document.getElementById('modalInsumoConfirm').addEventListener('click', ()=>{
     const data={nombre:document.getElementById('insNombre').value.trim(),unidad:document.getElementById('insUnidad').value,stockActual:parseFloat(document.getElementById('insStockActual').value)||0,stockMinimo:parseFloat(document.getElementById('insStockMinimo').value)||0};
     if (!data.nombre) { toast('Falta el nombre'); return; }
-    const ref=editandoInsumoId?db.collection('insumos').doc(editandoInsumoId):db.collection('insumos').doc();
+    const ref=editandoInsumoId?db.collection('negocios').doc(uidDueno).collection('insumos').doc(editandoInsumoId):db.collection('negocios').doc(uidDueno).collection('insumos').doc();
     ref.set(data,{merge:true}).then(()=>{ toast('Insumo guardado'); document.getElementById('modalInsumo').classList.remove('active'); }).catch(e=>logError('guardarInsumo',e));
   });
 
@@ -1071,7 +1101,7 @@
     });
     const ids=Object.keys(desc); if (!ids.length) return;
     const batch=db.batch();
-    ids.forEach(id=>batch.update(db.collection('insumos').doc(id),{stockActual:firebase.firestore.FieldValue.increment(-desc[id])}));
+    ids.forEach(id=>batch.update(db.collection('negocios').doc(uidDueno).collection('insumos').doc(id),{stockActual:firebase.firestore.FieldValue.increment(-desc[id])}));
     batch.commit().then(()=>{
       ids.forEach(insumoId=>{ const ins=insumos.find(i=>i.id===insumoId); if(ins&&(ins.stockActual-desc[insumoId])<=ins.stockMinimo) toast(`⚠️ Bajo stock: ${ins.nombre}`,'warn'); });
     }).catch(e=>logError('descontarStock',e));
@@ -1080,7 +1110,7 @@
   /* ════ REPORTES ════ */
   function escucharVentasHoy() {
     const hoy=new Date().toISOString().slice(0,10);
-    db.collection('ventas').where('fechaDia','==',hoy).onSnapshot(snap=>{
+    db.collection('negocios').doc(uidDueno).collection('ventas').where('fechaDia','==',hoy).onSnapshot(snap=>{
       const ventas=snap.docs.map(d=>d.data());
       document.getElementById('repPedidosDia').textContent=ventas.length;
       document.getElementById('repIngresosDia').textContent='$'+ventas.reduce((s,v)=>s+(v.total||0),0);
@@ -1107,7 +1137,7 @@
     }
     let ventas=[];
     if (estaOnline) {
-      const snap=await db.collection('ventas').where('fechaDia','>=',desde).where('fechaDia','<=',hasta).get();
+      const snap=await db.collection('negocios').doc(uidDueno).collection('ventas').where('fechaDia','>=',desde).where('fechaDia','<=',hasta).get();
       ventas=snap.docs.map(d=>d.data()).sort((a,b)=>(b.fechaDia||'').localeCompare(a.fechaDia||''));
     } else {
       const pend=await idbGetAll('ventas_pendientes');
@@ -1123,7 +1153,7 @@
   document.getElementById('exportCSVBtn').addEventListener('click', async () => {
     let ventas=ventasHistorialActual;
     if (!ventas.length) {
-      if (estaOnline) { const snap=await db.collection('ventas').where('fechaDia','==',fechaISO(new Date())).get(); ventas=snap.docs.map(d=>d.data()); }
+      if (estaOnline) { const snap=await db.collection('negocios').doc(uidDueno).collection('ventas').where('fechaDia','==',fechaISO(new Date())).get(); ventas=snap.docs.map(d=>d.data()); }
       else { ventas=await idbGetAll('ventas_pendientes'); }
     }
     if (!ventas.length) { toast('No hay ventas para exportar'); return; }
@@ -1149,13 +1179,14 @@
 
   /* ════ CONFIGURACIÓN ════ */
   function cargarConfiguracion() {
-    db.collection('configuracion').doc('general').get().then(doc=>{
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get().then(doc=>{
       const c=doc.exists?doc.data():{};
       document.getElementById('cfgNombre').value=c.nombre||'';
       document.getElementById('cfgHorario').value=c.horario||'';
       document.getElementById('cfgPinCajero').value=c.pinCajero||'2468';
       document.getElementById('cfgWhatsapp').value=c.whatsapp||'';
       pinCajeroActual=c.pinCajero||'2468';
+      actualizarLinkCajero();
       whatsappNumero=c.whatsapp||'';
       featuresActuales=Object.assign({stockHabilitado:false,recetasHabilitado:false,gastosHabilitado:false},c.features||{});
       renderPlusStatus();
@@ -1164,17 +1195,17 @@
   }
 
   document.getElementById('guardarCfgBtn').addEventListener('click', ()=>{
-    db.collection('configuracion').doc('general').set({nombre:document.getElementById('cfgNombre').value.trim(),horario:document.getElementById('cfgHorario').value.trim()},{merge:true}).then(()=>toast('Configuración guardada'));
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').set({nombre:document.getElementById('cfgNombre').value.trim(),horario:document.getElementById('cfgHorario').value.trim()},{merge:true}).then(()=>toast('Configuración guardada'));
   });
   document.getElementById('guardarWhatsappBtn').addEventListener('click', ()=>{
     const num=document.getElementById('cfgWhatsapp').value.replace(/\D/g,'');
     if (!num||num.length<10) { toast('Número inválido. Formato: 5491112345678'); return; }
-    db.collection('configuracion').doc('general').set({whatsapp:num},{merge:true}).then(()=>{ whatsappNumero=num; toast('Número guardado'); });
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').set({whatsapp:num},{merge:true}).then(()=>{ whatsappNumero=num; toast('Número guardado'); });
   });
   document.getElementById('guardarPinCajeroBtn').addEventListener('click', ()=>{
     const pin=document.getElementById('cfgPinCajero').value.trim();
     if (!pin||pin.length<4) { toast('El PIN debe tener al menos 4 dígitos'); return; }
-    db.collection('configuracion').doc('general').set({pinCajero:pin},{merge:true}).then(()=>{ pinCajeroActual=pin; toast('PIN actualizado'); });
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').set({pinCajero:pin},{merge:true}).then(()=>{ pinCajeroActual=pin; toast('PIN actualizado'); });
   });
 
   function ejecutarLimpiarDuplicados() {
@@ -1185,14 +1216,14 @@
     Object.values(grupos).forEach(lista=>{ if(lista.length<=1)return; gCount++; lista.sort((a,b)=>cr(b)-cr(a)); lista.slice(1).forEach(p=>aBorrar.push(p.id)); });
     if (!aBorrar.length) { toast('No se encontraron duplicados'); return; }
     if (!confirm(`Se van a eliminar ${aBorrar.length} productos duplicados (${gCount} grupos). ¿Continuar?`)) return;
-    const batch=db.batch(); aBorrar.forEach(id=>batch.delete(db.collection('productos').doc(id)));
+    const batch=db.batch(); aBorrar.forEach(id=>batch.delete(db.collection('negocios').doc(uidDueno).collection('productos').doc(id)));
     batch.commit().then(()=>toast(`${aBorrar.length} duplicados eliminados`));
   }
 
   function ejecutarRestablecerCatalogo() {
     if (!confirm('Esto va a BORRAR todos los productos actuales. ¿Seguro?')) return;
     if (!confirm('Confirmá: se borran todos y se carga el catálogo de ejemplo. ¿Continuar?')) return;
-    db.collection('productos').get().then(snap=>{ const b=db.batch(); snap.docs.forEach(doc=>b.delete(doc.ref)); return b.commit(); }).then(()=>{ precargarMenuEjemplo(); toast('Catálogo restablecido'); });
+    db.collection('negocios').doc(uidDueno).collection('productos').get().then(snap=>{ const b=db.batch(); snap.docs.forEach(doc=>b.delete(doc.ref)); return b.commit(); }).then(()=>{ precargarMenuEjemplo(); toast('Catálogo restablecido'); });
   }
 
   document.getElementById('limpiarDuplicadosBtn').addEventListener('click', ejecutarLimpiarDuplicados);
@@ -1214,7 +1245,7 @@
   /* ════ GASTOS ════ */
   function cargarGastosDelTurno() {
     const hoy=new Date().toISOString().slice(0,10);
-    db.collection('gastos').where('fechaDia','==',hoy).onSnapshot(snap=>{
+    db.collection('negocios').doc(uidDueno).collection('gastos').where('fechaDia','==',hoy).onSnapshot(snap=>{
       gastosDelTurno=snap.docs.map(d=>({id:d.id,...d.data()}));
       renderGastosBox();
     });
@@ -1237,7 +1268,7 @@
     const monto=parseFloat(document.getElementById('gastoMonto').value)||0;
     if (!desc) { toast('Ingresá una descripción'); return; }
     if (monto<=0) { toast('Ingresá un monto válido'); return; }
-    db.collection('gastos').add({ desc, monto, fechaDia:new Date().toISOString().slice(0,10), ts:firebase.firestore.FieldValue.serverTimestamp() }).then(()=>{ toast('Gasto registrado'); document.getElementById('modalGasto').classList.remove('active'); }).catch(e=>logError('gasto',e));
+    db.collection('negocios').doc(uidDueno).collection('gastos').add({ desc, monto, fechaDia:new Date().toISOString().slice(0,10), ts:firebase.firestore.FieldValue.serverTimestamp() }).then(()=>{ toast('Gasto registrado'); document.getElementById('modalGasto').classList.remove('active'); }).catch(e=>logError('gasto',e));
   });
 
   /* ════ CIERRE DE CAJA ════ */
@@ -1264,7 +1295,7 @@
     const hoy=new Date().toISOString().slice(0,10);
     let ventas=[];
     if (estaOnline) {
-      const snap=await db.collection('ventas').where('fechaDia','==',hoy).get().catch(e=>{ logError('cierre-query',e); return {docs:[]}; });
+      const snap=await db.collection('negocios').doc(uidDueno).collection('ventas').where('fechaDia','==',hoy).get().catch(e=>{ logError('cierre-query',e); return {docs:[]}; });
       ventas=snap.docs.map(d=>d.data());
     } else {
       const pend=await idbGetAll('ventas_pendientes');
@@ -1299,7 +1330,7 @@
     };
 
     if (estaOnline) {
-      await db.collection('cierres').add({...cierreData,ts:firebase.firestore.FieldValue.serverTimestamp()}).catch(e=>logError('cierre',e));
+      await db.collection('negocios').doc(uidDueno).collection('cierres').add({...cierreData,ts:firebase.firestore.FieldValue.serverTimestamp()}).catch(e=>logError('cierre',e));
     } else {
       await idbAdd('cierres_pendientes', cierreData);
       await actualizarBadge();
@@ -1365,7 +1396,7 @@
   document.getElementById('modalFeaturesCancel').addEventListener('click', ()=>document.getElementById('modalFeatures').classList.remove('active'));
   document.getElementById('modalFeaturesGuardar').addEventListener('click', ()=>{
     const nuevas={ stockHabilitado:document.getElementById('flagStock').checked, recetasHabilitado:document.getElementById('flagRecetas').checked, gastosHabilitado:document.getElementById('flagGastos').checked };
-    db.collection('configuracion').doc('general').set({features:nuevas},{merge:true}).then(()=>{
+    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').set({features:nuevas},{merge:true}).then(()=>{
       featuresActuales=nuevas; renderPlusStatus(); toast('Features actualizadas'); document.getElementById('modalFeatures').classList.remove('active');
     });
   });
@@ -1381,11 +1412,11 @@ async function generarBackup(silencioso) {
   var uid = auth.currentUser ? auth.currentUser.uid : null;
   if (!uid) return;
   try {
-    var ventasSnap = await db.collection('ventas').get().catch(function(){return {docs:[]};});
-    var productosSnap = await db.collection('productos').get().catch(function(){return {docs:[]};});
-    var insumosSnap = await db.collection('insumos').get().catch(function(){return {docs:[]};});
-    var cierresSnap = await db.collection('cierres').get().catch(function(){return {docs:[]};});
-    var configSnap = await db.collection('configuracion').doc('general').get().catch(function(){return {exists:false};});
+    var ventasSnap = await db.collection('negocios').doc(uidDueno).collection('ventas').get().catch(function(){return {docs:[]};});
+    var productosSnap = await db.collection('negocios').doc(uidDueno).collection('productos').get().catch(function(){return {docs:[]};});
+    var insumosSnap = await db.collection('negocios').doc(uidDueno).collection('insumos').get().catch(function(){return {docs:[]};});
+    var cierresSnap = await db.collection('negocios').doc(uidDueno).collection('cierres').get().catch(function(){return {docs:[]};});
+    var configSnap = await db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get().catch(function(){return {exists:false};});
     var fecha = new Date().toISOString().slice(0,10);
     var backup = {
       app:'PanAR', version:'1.4', fecha:new Date().toISOString(), uid:uid,
@@ -1416,11 +1447,11 @@ async function restaurarBackup(input) {
     if (backup.app !== 'PanAR') { toast('El archivo no es un backup de PanAR'); return; }
     toast('Restaurando datos...');
     var batch = db.batch(); var count = 0;
-    (backup.ventas||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('ventas').doc(id),d);if(++count%400===0){batch.commit();batch=db.batch();}});
-    (backup.productos||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('productos').doc(id),d);});
-    (backup.insumos||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('insumos').doc(id),d);});
-    (backup.cierres||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('cierres').doc(id),d);});
-    if(backup.configuracion&&Object.keys(backup.configuracion).length>0){batch.set(db.collection('configuracion').doc('general'),backup.configuracion,{merge:true});}
+    (backup.ventas||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('negocios').doc(uidDueno).collection('ventas').doc(id),d);if(++count%400===0){batch.commit();batch=db.batch();}});
+    (backup.productos||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('negocios').doc(uidDueno).collection('productos').doc(id),d);});
+    (backup.insumos||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('negocios').doc(uidDueno).collection('insumos').doc(id),d);});
+    (backup.cierres||[]).forEach(function(v){var id=v._id;var d=Object.assign({},v);delete d._id;batch.set(db.collection('negocios').doc(uidDueno).collection('cierres').doc(id),d);});
+    if(backup.configuracion&&Object.keys(backup.configuracion).length>0){batch.set(db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general'),backup.configuracion,{merge:true});}
     await batch.commit();
     toast('✅ Backup restaurado'); input.value='';
     setTimeout(function(){location.reload();},1500);
@@ -1433,6 +1464,25 @@ function chequearBackupDiario() {
   var el = document.getElementById('ultimoBackupFecha'); if (el && ultimo) el.textContent = ultimo;
   if (ultimo !== hoy) { setTimeout(function(){generarBackup(true);},5000); }
 }
+
+
+  // ── Link cajero compartible ──────────────────────────
+  function actualizarLinkCajero() {
+    if (!uidDueno) return;
+    const base = window.location.origin + window.location.pathname;
+    const link = `${base}?negocio=${uidDueno}&rol=cajero`;
+    const el = document.getElementById('linkCajeroDisplay');
+    if (el) el.textContent = link;
+    const btn = document.getElementById('compartirLinkCajeroBtn');
+    if (btn) {
+      btn.onclick = () => {
+        const nombre = document.getElementById('cfgNombre')?.value || 'PanAR';
+        const pin    = pinCajeroActual || '2468';
+        const msg    = `🥖 ${nombre}\nLink de acceso como cajero:\n${link}\nPIN: ${pin}`;
+        window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+      };
+    }
+  }
 
 </script>
 </body>
