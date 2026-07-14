@@ -653,54 +653,62 @@
 
   /* ════ AUTH ════ */
   // URL params — si viene ?negocio=UID&rol=cajero es acceso de cajero
-  const _params     = new URLSearchParams(window.location.search);
-  const _negocioUID = _params.get('negocio') || sessionStorage.getItem('panar_uidDueno');
-  const _rolParam   = _params.get('rol')     || sessionStorage.getItem('panar_rol');
+  // ── NUEVA ARQUITECTURA CAJERO ─────────────────────────
+  // Sin Firebase Auth para el cajero.
+  // El código de 6 dígitos en la URL resuelve el UID del dueño.
+  const _codigoCajero = new URLSearchParams(window.location.search).get('cajero');
 
-  if (_negocioUID && _rolParam === 'cajero') {
-    uidDueno = _negocioUID;
-    sessionStorage.setItem('panar_uidDueno', _negocioUID);
-    sessionStorage.setItem('panar_rol', 'cajero');
-    document.getElementById('loadingScreen').classList.add('hide');
-    db.collection('negocios').doc(uidDueno).collection('configuracion').doc('general').get()
-      .then(doc => {
-        pinCajeroActual = (doc.exists && doc.data().pinCajero) ? doc.data().pinCajero : '2468';
-      }).catch(() => {})
-      .finally(() => {
-        document.getElementById('pinCajeroInput').value = '';
-        document.getElementById('pinCajeroError').textContent = '';
-        document.getElementById('modalPinCajero').classList.add('active');
-        setTimeout(() => document.getElementById('pinCajeroInput').focus(), 50);
-      });
-  }
-
-  auth.onAuthStateChanged(async user => {
-    document.getElementById('loadingScreen').classList.add('hide');
-    if (user) {
-      await abrirIDB();
-      if (!_negocioUID) {
-        uidDueno = user.uid;
-        rolActual = 'dueño';
-      } else {
-        uidDueno = _negocioUID; // garantizar que está seteado
-        rolActual = 'cajero';
+  async function iniciarComoCajero(codigo) {
+    try {
+      const snap = await db.collection('accesos').doc(codigo).get();
+      if (!snap.exists) {
+        document.getElementById('loadingScreen').classList.add('hide');
+        document.getElementById('loginScreen').classList.add('active');
+        alert('Código de acceso inválido. Pedile un link nuevo al dueño.');
+        return;
       }
-      document.getElementById('loginScreen').classList.remove('active');
-      document.getElementById('app').classList.add('active');
-      cargarProductos();
-      cargarInsumos();
-      cargarConfiguracion();
-      cargarGastosDelTurno();
-      if (rolActual === 'dueño') escucharVentasHoy();
-      aplicarRestriccionesPorRol();
-      actualizarEstadoConexion(navigator.onLine);
-      await actualizarBadge();
-    } else if (!_negocioUID) {
-      rolActual = null;
-      document.getElementById('app').classList.remove('active');
+      const acceso = snap.data();
+      uidDueno = acceso.uidDueno;
+      pinCajeroActual = acceso.pin || '2468';
+      document.getElementById('loadingScreen').classList.add('hide');
+      document.getElementById('pinCajeroInput').value = '';
+      document.getElementById('pinCajeroError').textContent = '';
+      document.getElementById('modalPinCajero').classList.add('active');
+      setTimeout(() => document.getElementById('pinCajeroInput').focus(), 50);
+    } catch(e) {
+      console.error('Error buscando acceso:', e);
+      document.getElementById('loadingScreen').classList.add('hide');
       document.getElementById('loginScreen').classList.add('active');
     }
-  });
+  }
+
+  if (_codigoCajero) {
+    iniciarComoCajero(_codigoCajero);
+  } else {
+    // Flujo normal — dueño con Google
+    auth.onAuthStateChanged(async user => {
+      document.getElementById('loadingScreen').classList.add('hide');
+      if (user) {
+        uidDueno = user.uid;
+        rolActual = 'dueño';
+        await abrirIDB();
+        document.getElementById('loginScreen').classList.remove('active');
+        document.getElementById('app').classList.add('active');
+        cargarProductos();
+        cargarInsumos();
+        cargarConfiguracion();
+        cargarGastosDelTurno();
+        escucharVentasHoy();
+        aplicarRestriccionesPorRol();
+        actualizarEstadoConexion(navigator.onLine);
+        await actualizarBadge();
+      } else {
+        rolActual = null;
+        document.getElementById('app').classList.remove('active');
+        document.getElementById('loginScreen').classList.add('active');
+      }
+    });
+  }
 
   document.getElementById('loginBtn').addEventListener('click', () => {
     auth.signInWithEmailAndPassword(document.getElementById('loginEmail').value.trim(), document.getElementById('loginPass').value)
@@ -724,9 +732,9 @@
     if (document.getElementById('pinCajeroInput').value === pinCajeroActual) {
       document.getElementById('modalPinCajero').classList.remove('active');
       rolActual = 'cajero';
+      await abrirIDB();
       document.getElementById('loginScreen').classList.remove('active');
       document.getElementById('app').classList.add('active');
-      await abrirIDB();
       cargarProductos();
       cargarInsumos();
       cargarConfiguracion();
@@ -734,7 +742,6 @@
       aplicarRestriccionesPorRol();
       actualizarEstadoConexion(navigator.onLine);
       await actualizarBadge();
-      auth.signInAnonymously().catch(e => console.warn('Auth anónimo:', e.message));
     } else { document.getElementById('pinCajeroError').textContent = 'PIN incorrecto'; }
   });
   document.getElementById('pinCajeroInput').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('pinCajeroConfirmBtn').click(); });
@@ -1497,6 +1504,29 @@ function chequearBackupDiario() {
       };
     }
   }
+
+
+  // ── Generar código de acceso para cajero ─────────────
+  async function generarCodigoAcceso() {
+    if (!uidDueno) return;
+    const codigo = Math.floor(100000 + Math.random() * 900000).toString();
+    const pin    = pinCajeroActual || '2468';
+    try {
+      await db.collection('accesos').doc(codigo).set({
+        uidDueno, pin, app: 'panar',
+        creadoEn: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      const base = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/');
+      const link = `${base}?cajero=${codigo}`;
+      document.getElementById('linkCajeroDisplay').textContent = link;
+      document.getElementById('compartirLinkCajeroBtn').onclick = () => {
+        const nombre = document.getElementById('cfgNombre')?.value || 'PanAR';
+        const msg = `🥖 ${nombre}\nLink para el cajero:\n${link}\nPIN: ${pin}`;
+        window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+      };
+    } catch(e) { logError('generarCodigoAcceso', e.message); }
+  }
+  function actualizarLinkCajero() { generarCodigoAcceso(); }
 
 </script>
 </body>
