@@ -720,10 +720,21 @@
     });
   });
   document.getElementById('pinCajeroCancelBtn').addEventListener('click', () => document.getElementById('modalPinCajero').classList.remove('active'));
-  document.getElementById('pinCajeroConfirmBtn').addEventListener('click', () => {
+  document.getElementById('pinCajeroConfirmBtn').addEventListener('click', async () => {
     if (document.getElementById('pinCajeroInput').value === pinCajeroActual) {
       document.getElementById('modalPinCajero').classList.remove('active');
-      auth.signInAnonymously().catch(() => { document.getElementById('pinCajeroError').textContent = 'No se pudo ingresar'; });
+      rolActual = 'cajero';
+      document.getElementById('loginScreen').classList.remove('active');
+      document.getElementById('app').classList.add('active');
+      await abrirIDB();
+      cargarProductos();
+      cargarInsumos();
+      cargarConfiguracion();
+      cargarGastosDelTurno();
+      aplicarRestriccionesPorRol();
+      actualizarEstadoConexion(navigator.onLine);
+      await actualizarBadge();
+      auth.signInAnonymously().catch(e => console.warn('Auth anónimo:', e.message));
     } else { document.getElementById('pinCajeroError').textContent = 'PIN incorrecto'; }
   });
   document.getElementById('pinCajeroInput').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('pinCajeroConfirmBtn').click(); });
