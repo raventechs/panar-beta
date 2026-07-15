@@ -229,14 +229,16 @@ body, input, button, select, textarea {
   box-shadow: 0 1px 6px rgba(192,57,43,.25) !important;
 }
 
-/* Botones secundarios */
+/* Botones secundarios — sombra naranja */
 .btn-secondary, .btn-naranja {
   border-radius: 14px !important;
-  transition: transform .12s ease !important;
+  transition: transform .12s ease, box-shadow .12s ease !important;
   font-weight: 600 !important;
+  box-shadow: 0 4px 14px rgba(230,126,34,.35), 0 1px 4px rgba(230,126,34,.15) !important;
 }
 .btn-secondary:active, .btn-naranja:active {
   transform: scale(0.97) !important;
+  box-shadow: 0 2px 6px rgba(230,126,34,.2) !important;
 }
 
 /* Botón cobrar — más alto y prominente */
@@ -275,6 +277,25 @@ input, select, textarea {
   font-weight: 600 !important;
   box-shadow: 0 4px 20px rgba(0,0,0,.15) !important;
 }
+
+/* Botones método de pago */
+.btn-metodo, [id*="metodo"], [id*="efectivo"], [id*="debito"],
+button[class*="metodo"], button[class*="pago"] {
+  border-radius: 14px !important;
+  font-weight: 600 !important;
+  transition: transform .12s ease, box-shadow .12s ease !important;
+  box-shadow: 0 3px 10px rgba(0,0,0,.1) !important;
+}
+button[class*="metodo"]:active, button[class*="pago"]:active {
+  transform: scale(0.97) !important;
+}
+
+/* Sombra en sección venta actual y total */
+[class*="venta-actual"], [class*="total-section"], [id*="ventaActual"] {
+  border-radius: 16px !important;
+  box-shadow: 0 2px 16px rgba(0,0,0,.07) !important;
+}
+
 /* ──────────────────────────────────────────────────── */
 
 </style>
